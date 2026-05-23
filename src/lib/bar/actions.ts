@@ -26,11 +26,6 @@ export async function dispatchBarInput(
 	text: string
 ): Promise<number> {
 	switch (mode) {
-		case 'craving':
-			return appendEvent({
-				event_type: 'craving_logged',
-				payload: { halt: { hungry: false, angry: false, lonely: false, tired: false } }
-			});
 		case 'task':
 			// placeholder task_id 0 — task management is feat/03+
 			return appendEvent({

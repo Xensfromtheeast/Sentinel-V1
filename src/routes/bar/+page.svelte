@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
+	import { getCurrentWebviewWindow, WebviewWindow } from '@tauri-apps/api/webviewWindow';
 	import { mode } from '$lib/stores/mode.js';
 	import { classifyFirstKey, dispatchBarInput } from '$lib/bar/actions.js';
 	import type { BarMode } from '$lib/bar/actions.js';
@@ -11,6 +11,7 @@
 	let placeholder = $state('c · t · i · f · anything…');
 
 	const win = getCurrentWebviewWindow();
+	let intercepting = false;
 
 	const IDLE_PLACEHOLDER = 'c · t · i · f · anything…';
 
@@ -52,6 +53,14 @@
 			e.preventDefault();
 			const result = classifyFirstKey(e.key.toLowerCase());
 			if (result.immediate) {
+				if (result.mode === 'craving' && !intercepting) {
+					intercepting = true;
+					WebviewWindow.getByLabel('overlay').then((overlay) => {
+						if (!overlay) return;
+						return overlay.show().then(() => overlay.setFocus());
+					}).then(() => hide()).catch(console.error).finally(() => { intercepting = false; });
+					return;
+				}
 				dispatchBarInput(result.mode, '').then(() => hide()).catch(console.error);
 				return;
 			}

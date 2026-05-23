@@ -34,6 +34,25 @@
 			if (!barOrNull) return;
 			const barRef = barOrNull;
 
+			let overlayOrNull = await WebviewWindow.getByLabel('overlay');
+			if (!overlayOrNull) {
+				try {
+					overlayOrNull = new WebviewWindow('overlay', {
+						url: '/overlay',
+						decorations: false,
+						alwaysOnTop: true,
+						width: 440,
+						height: 320,
+						visible: false,
+						skipTaskbar: true,
+						resizable: false,
+						title: 'Sentinel Overlay'
+					});
+				} catch {
+					overlayOrNull = await WebviewWindow.getByLabel('overlay');
+				}
+			}
+
 			async function toggleBar() {
 				const visible = await barRef.isVisible();
 				if (visible) {
