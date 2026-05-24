@@ -4,6 +4,7 @@ use std::fs;
 
 const DB_URL: &str = "sqlite:/home/adminxens/Sentinel/events.db";
 const NOTES_DIR: &str = "/home/adminxens/Sentinel/notes";
+const EXPORT_DIR: &str = "/home/adminxens/Sentinel/export";
 
 const MIGRATION_001: &str = "
 CREATE TABLE IF NOT EXISTS events (
@@ -45,6 +46,31 @@ fn write_daily_note(date: String, content: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Writes the pre-formatted export content to ~/Sentinel/export/{date}.md and .json.
+/// The frontend queries the DB and formats the content; this command only handles I/O.
+#[tauri::command]
+fn write_export(date: String, md_content: String, json_content: String) -> Result<serde_json::Value, String> {
+    let dir = Path::new(EXPORT_DIR);
+    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+
+    let md_path = dir.join(format!("{}.md", date));
+    let json_path = dir.join(format!("{}.json", date));
+
+    let md_tmp = dir.join(format!("{}.md.tmp", date));
+    let json_tmp = dir.join(format!("{}.json.tmp", date));
+
+    fs::write(&md_tmp, &md_content).map_err(|e| e.to_string())?;
+    fs::rename(&md_tmp, &md_path).map_err(|e| e.to_string())?;
+
+    fs::write(&json_tmp, &json_content).map_err(|e| e.to_string())?;
+    fs::rename(&json_tmp, &json_path).map_err(|e| e.to_string())?;
+
+    Ok(serde_json::json!({
+        "md_path": md_path.to_string_lossy(),
+        "json_path": json_path.to_string_lossy()
+    }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let migrations = vec![Migration {
@@ -55,7 +81,7 @@ pub fn run() {
     }];
 
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![read_daily_note, write_daily_note])
+        .invoke_handler(tauri::generate_handler![read_daily_note, write_daily_note, write_export])
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations(DB_URL, migrations)

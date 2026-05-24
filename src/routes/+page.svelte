@@ -5,10 +5,25 @@
 	import { basicSetup } from 'codemirror';
 	import { markdown } from '@codemirror/lang-markdown';
 	import { readDailyNote, writeDailyNote, saveNote, localDate } from '$lib/note/index.js';
+	import { exportAll } from '$lib/export/index.js';
 
 	const date = localDate();
 
 	let container = $state<HTMLDivElement | null>(null);
+	let exportStatus = $state<'idle' | 'exporting' | 'done' | 'error'>('idle');
+
+	async function handleExport() {
+		if (exportStatus === 'exporting') return;
+		exportStatus = 'exporting';
+		try {
+			await exportAll();
+			exportStatus = 'done';
+			setTimeout(() => { exportStatus = 'idle'; }, 2500);
+		} catch {
+			exportStatus = 'error';
+			setTimeout(() => { exportStatus = 'idle'; }, 3000);
+		}
+	}
 
 	const darkTheme = EditorView.theme(
 		{
@@ -82,6 +97,14 @@
 <div class="page">
 	<header class="note-header">
 		<span class="date-label">{date}</span>
+		<button
+			class="export-btn"
+			onclick={handleExport}
+			disabled={exportStatus === 'exporting'}
+			aria-label="Export event log"
+		>
+			{#if exportStatus === 'exporting'}⏳{:else if exportStatus === 'done'}✓ Exported{:else if exportStatus === 'error'}✗ Error{:else}Export{/if}
+		</button>
 	</header>
 	<div class="editor-wrap" bind:this={container}></div>
 </div>
@@ -119,6 +142,29 @@
 		font-size: 13px;
 		color: #7878aa;
 		letter-spacing: 0.05em;
+	}
+
+	.export-btn {
+		margin-left: auto;
+		padding: 3px 10px;
+		background: transparent;
+		border: 1px solid #3a3a5c;
+		border-radius: 4px;
+		color: #7878aa;
+		font-family: monospace;
+		font-size: 12px;
+		cursor: pointer;
+		transition: color 0.15s, border-color 0.15s;
+	}
+
+	.export-btn:hover:not(:disabled) {
+		color: #b8b8dd;
+		border-color: #6060aa;
+	}
+
+	.export-btn:disabled {
+		opacity: 0.5;
+		cursor: default;
 	}
 
 	.editor-wrap {
