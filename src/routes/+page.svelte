@@ -11,6 +11,7 @@
 
 	let container = $state<HTMLDivElement | null>(null);
 	let exportStatus = $state<'idle' | 'exporting' | 'done' | 'error'>('idle');
+	let resetTimer: ReturnType<typeof setTimeout> | undefined;
 
 	async function handleExport() {
 		if (exportStatus === 'exporting') return;
@@ -18,10 +19,13 @@
 		try {
 			await exportAll();
 			exportStatus = 'done';
-			setTimeout(() => { exportStatus = 'idle'; }, 2500);
-		} catch {
+			clearTimeout(resetTimer);
+			resetTimer = setTimeout(() => { exportStatus = 'idle'; }, 2500);
+		} catch (e) {
+			console.error('export failed:', e);
 			exportStatus = 'error';
-			setTimeout(() => { exportStatus = 'idle'; }, 3000);
+			clearTimeout(resetTimer);
+			resetTimer = setTimeout(() => { exportStatus = 'idle'; }, 3000);
 		}
 	}
 

@@ -50,20 +50,41 @@ fn write_daily_note(date: String, content: String) -> Result<(), String> {
 /// The frontend queries the DB and formats the content; this command only handles I/O.
 #[tauri::command]
 fn write_export(date: String, md_content: String, json_content: String) -> Result<serde_json::Value, String> {
+    // Guard: date must be YYYY-MM-DD (10 chars, digits + hyphens only) — prevent path traversal.
+    if date.len() != 10 || !date.chars().all(|c| c.is_ascii_digit() || c == '-') {
+        return Err(format!("invalid date '{}': expected YYYY-MM-DD", date));
+    }
+
     let dir = Path::new(EXPORT_DIR);
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
 
     let md_path = dir.join(format!("{}.md", date));
     let json_path = dir.join(format!("{}.json", date));
-
     let md_tmp = dir.join(format!("{}.md.tmp", date));
     let json_tmp = dir.join(format!("{}.json.tmp", date));
 
-    fs::write(&md_tmp, &md_content).map_err(|e| e.to_string())?;
-    fs::rename(&md_tmp, &md_path).map_err(|e| e.to_string())?;
+    // Write both tmp files before committing either rename.
+    // On any write failure: clean up both tmps and return — no partial commit.
+    if let Err(e) = fs::write(&md_tmp, &md_content) {
+        let _ = fs::remove_file(&md_tmp);
+        return Err(e.to_string());
+    }
+    if let Err(e) = fs::write(&json_tmp, &json_content) {
+        let _ = fs::remove_file(&md_tmp);
+        let _ = fs::remove_file(&json_tmp);
+        return Err(e.to_string());
+    }
 
-    fs::write(&json_tmp, &json_content).map_err(|e| e.to_string())?;
-    fs::rename(&json_tmp, &json_path).map_err(|e| e.to_string())?;
+    // Rename both; on rename failure clean up orphaned tmps.
+    if let Err(e) = fs::rename(&md_tmp, &md_path) {
+        let _ = fs::remove_file(&md_tmp);
+        let _ = fs::remove_file(&json_tmp);
+        return Err(e.to_string());
+    }
+    if let Err(e) = fs::rename(&json_tmp, &json_path) {
+        let _ = fs::remove_file(&json_tmp);
+        return Err(e.to_string());
+    }
 
     Ok(serde_json::json!({
         "md_path": md_path.to_string_lossy(),

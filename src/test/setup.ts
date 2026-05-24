@@ -17,3 +17,11 @@ vi.mock('@tauri-apps/plugin-sql', () => ({
 vi.mock('@tauri-apps/api/core', () => ({
 	invoke: vi.fn().mockResolvedValue(null)
 }));
+
+// Mock the notification plugin so notification helpers can be imported
+// in tests without a Tauri runtime.
+vi.mock('@tauri-apps/plugin-notification', () => ({
+	sendNotification: vi.fn().mockResolvedValue(undefined),
+	isPermissionGranted: vi.fn().mockResolvedValue(true),
+	requestPermission: vi.fn().mockResolvedValue('granted')
+}));

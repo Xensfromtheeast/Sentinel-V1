@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { asc } from 'drizzle-orm';
+import { asc, like } from 'drizzle-orm';
 import { getDb } from '$lib/db/database.js';
 import { events } from '$lib/db/schema.js';
 import { buildMarkdownExport, buildJsonExport, type EventRow } from './format.js';
@@ -17,9 +17,10 @@ export type ExportResult = {
  */
 export async function exportAll(): Promise<ExportResult> {
 	const db = await getDb();
-	const rows = await db.select().from(events).orderBy(asc(events.ts)) as EventRow[];
-
 	const date = localDate();
+	const rows = await db.select().from(events)
+		.where(like(events.ts, `${date}%`))
+		.orderBy(asc(events.ts)) as EventRow[];
 	const mdContent = buildMarkdownExport(date, rows);
 	const jsonContent = buildJsonExport(rows);
 

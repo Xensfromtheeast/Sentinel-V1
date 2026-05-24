@@ -1,5 +1,6 @@
 import { appendEvent } from '$lib/db/index.js';
 import type { HaltFlags } from '$lib/types/events.js';
+import { notifyCravingSurfed } from '$lib/notifications/index.js';
 
 export async function logCraving(halt: HaltFlags): Promise<number> {
 	return appendEvent({
@@ -9,10 +10,14 @@ export async function logCraving(halt: HaltFlags): Promise<number> {
 }
 
 export async function resolveAsSurfed(startedAt: number): Promise<number> {
-	return appendEvent({
+	const duration_ms = Date.now() - startedAt;
+	const id = await appendEvent({
 		event_type: 'craving_resolved',
-		payload: { outcome: 'surfed', duration_ms: Date.now() - startedAt }
+		payload: { outcome: 'surfed', duration_ms }
 	});
+	// Fire-and-forget: notification failure must never block the resolve flow
+	notifyCravingSurfed(duration_ms).catch(console.error);
+	return id;
 }
 
 export async function resolveAsSmoked(startedAt: number): Promise<void> {
