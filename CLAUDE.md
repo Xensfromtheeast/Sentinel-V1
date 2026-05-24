@@ -12,7 +12,11 @@
 
 ## Data Directory
 
-`~/Sentinel/events.db` — absolute path, Syncthing-shared root. Never Tauri app-data-relative.
+`~/Sentinel/events.db` — resolved at runtime via `HOME` (Linux/macOS) or `USERPROFILE` (Windows).
+Syncthing-shared root. Never Tauri app-data-relative.
+
+- Linux: `/home/<user>/Sentinel/`
+- Windows: `C:\Users\<user>\Sentinel\`
 
 ## Banned Libraries
 

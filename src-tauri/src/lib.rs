@@ -1,10 +1,16 @@
 use tauri_plugin_sql::{Migration, MigrationKind};
-use std::path::Path;
+use std::path::PathBuf;
 use std::fs;
 
-const DB_URL: &str = "sqlite:/home/adminxens/Sentinel/events.db";
-const NOTES_DIR: &str = "/home/adminxens/Sentinel/notes";
-const EXPORT_DIR: &str = "/home/adminxens/Sentinel/export";
+/// Resolves ~/Sentinel/ on any platform.
+/// Reads HOME (Linux/macOS) or USERPROFILE (Windows) so the data directory
+/// is always the user's home folder regardless of which machine the app runs on.
+fn sentinel_base() -> PathBuf {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .expect("HOME / USERPROFILE not set");
+    PathBuf::from(home).join("Sentinel")
+}
 
 const MIGRATION_001: &str = "
 CREATE TABLE IF NOT EXISTS events (
@@ -27,7 +33,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_events_source ON events(source_device, sou
 
 #[tauri::command]
 fn read_daily_note(date: String) -> Result<String, String> {
-    let path = Path::new(NOTES_DIR).join(format!("{}.md", date));
+    let path = sentinel_base().join("notes").join(format!("{}.md", date));
     match fs::read_to_string(&path) {
         Ok(content) => Ok(content),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
@@ -37,8 +43,8 @@ fn read_daily_note(date: String) -> Result<String, String> {
 
 #[tauri::command]
 fn write_daily_note(date: String, content: String) -> Result<(), String> {
-    let dir = Path::new(NOTES_DIR);
-    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let dir = sentinel_base().join("notes");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let tmp_path = dir.join(format!("{}.md.tmp", date));
     let path = dir.join(format!("{}.md", date));
     fs::write(&tmp_path, &content).map_err(|e| e.to_string())?;
@@ -55,8 +61,8 @@ fn write_export(date: String, md_content: String, json_content: String) -> Resul
         return Err(format!("invalid date '{}': expected YYYY-MM-DD", date));
     }
 
-    let dir = Path::new(EXPORT_DIR);
-    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let dir = sentinel_base().join("export");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
     let md_path = dir.join(format!("{}.md", date));
     let json_path = dir.join(format!("{}.json", date));
@@ -101,11 +107,18 @@ pub fn run() {
         kind: MigrationKind::Up,
     }];
 
+    // Resolve ~/Sentinel/events.db at runtime. Forward slashes used in the
+    // sqlite: URL so it works on Windows (backslashes) and Linux/macOS alike.
+    let db_url = format!(
+        "sqlite:{}",
+        sentinel_base().join("events.db").to_string_lossy().replace('\\', "/")
+    );
+
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![read_daily_note, write_daily_note, write_export])
         .plugin(
             tauri_plugin_sql::Builder::default()
-                .add_migrations(DB_URL, migrations)
+                .add_migrations(&db_url, migrations)
                 .build(),
         )
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
