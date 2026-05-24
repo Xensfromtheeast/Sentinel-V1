@@ -43,7 +43,9 @@
 | feat/02-sentinel-bar | Always-on-top bar, global shortcut, mode display |
 | feat/03-craving-overlay | HALT check, craving log, resolution flow |
 | feat/04-daily-note | Daily Markdown note, CodeMirror full edit |
-| feat/05-mind-tree | Node/edge graph, linking |
-| feat/06-rules-engine | Rule definitions, rule_fired events |
-| feat/07-sync | Syncthing health check, conflict detection |
-| feat/08-pwa | Phone PWA routes, platform detection |
+| feat/05-export | Event log export to .md + .json via Rust write_export |
+| feat/06-notifications | Native OS notifications for craving surfed / first craving |
+| feat/07-mind-tree | Node/edge graph, linking |
+| feat/08-rules-engine | Rule definitions, rule_fired events |
+| feat/09-sync | Syncthing health check, conflict detection |
+| feat/10-pwa | Phone PWA routes, platform detection |
