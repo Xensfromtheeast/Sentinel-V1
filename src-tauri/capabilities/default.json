@@ -9,6 +9,9 @@
     "core:default",
     "sql:default",
     "global-shortcut:default",
-    "notification:default"
+    "notification:default",
+    "updater:default",
+    "process:default",
+    "process:allow-relaunch"
   ]
 }
