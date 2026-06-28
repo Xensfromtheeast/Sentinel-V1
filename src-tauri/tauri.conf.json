@@ -40,7 +40,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU4MTZFMjc0NjVDRTUyQTIKUldTaVVzNWxkT0lXV0NMVTJTSG9idHVLNEtjckprQkhIakZMbzg4SG1PdzZnbkVxOFVSbjZVMlUK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkzQkM3RDlFQUI4MzhENEQKUldSTmpZT3JubjI4a3pBUGtDbE8zbzFLZVRBbll3VnNra1EvMkNBZDU0YW5EdXREZWhNTVh0eTMK",
       "endpoints": [
         "https://github.com/Xensfromtheeast/Sentinel-V1/releases/latest/download/latest.json"
       ]
