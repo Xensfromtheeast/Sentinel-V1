@@ -7,7 +7,16 @@
 	import { readDailyNote, writeDailyNote, saveNote, localDate } from '$lib/note/index.js';
 	import { exportAll } from '$lib/export/index.js';
 	import { logCraving, resolveAsSurfed, resolveAsSmoked } from '$lib/overlay/actions.js';
-	import { readRecentEvents, type StoredEvent } from '$lib/db/queries.js';
+	import { createNode, linkNodes } from '$lib/mind/actions.js';
+	import {
+		readRecentEvents,
+		readCravings,
+		readMindGraph,
+		type StoredEvent,
+		type CravingRecord,
+		type GraphNode,
+		type MindGraph
+	} from '$lib/db/queries.js';
 	import { theme, toggleTheme } from '$lib/stores/theme.js';
 	import type { HaltFlags } from '$lib/types/events.js';
 
@@ -173,13 +182,21 @@
 		step = Math.max(0, step - 1);
 	}
 
+	let loggedId: number | undefined;
+
 	async function startSurf() {
 		stopSurf();
 		step = 2;
 		surf = 60;
 		startedAt = Date.now();
+		loggedId = undefined;
+		const triggers = TRIGGERS.filter(([k]) => trig[k]).map(([, l]) => l);
 		// Persist the craving the moment surfing begins (real append-only event).
-		logCraving(haltFlags).catch(console.error);
+		try {
+			loggedId = await logCraving(haltFlags, intensity, triggers);
+		} catch (err) {
+			console.error('failed to log craving:', err);
+		}
 		surfTimer = setInterval(() => {
 			surf = Math.max(0, surf - 1);
 			if (surf <= 0) finish('surfed');
@@ -190,13 +207,15 @@
 		outcome = result;
 		step = 3;
 		try {
-			if (result === 'surfed') await resolveAsSurfed(startedAt);
-			else await resolveAsSmoked(startedAt);
+			// Link the resolution back to the logged craving via parent_event_id.
+			if (result === 'surfed') await resolveAsSurfed(startedAt, loggedId);
+			else await resolveAsSmoked(startedAt, loggedId);
 		} catch (err) {
 			console.error('failed to resolve craving:', err);
 		}
-		// Reflect the just-written craving (and its earlier logged event) in the timeline.
+		// Reflect the just-written craving in the timeline and cravings view.
 		loadEvents();
+		loadCravings();
 	}
 
 	// ----- Today timeline (real DB reads) -----
@@ -287,17 +306,6 @@
 		}
 	}
 
-	onMount(loadEvents);
-
-	// ----- presentational data (Cravings view — wired in a later feature branch) -----
-	type HistoryRow = { when: string; out: 'surfed' | 'smoked'; halt: string; intensity: number; trig: string };
-	let history = $state<HistoryRow[]>([
-		{ when: 'Today · 09:15', out: 'surfed', halt: 'Tired', intensity: 6, trig: 'After work' },
-		{ when: 'Yesterday · 22:40', out: 'surfed', halt: 'Lonely · Tired', intensity: 8, trig: 'Boredom' },
-		{ when: 'Yesterday · 16:05', out: 'smoked', halt: '—', intensity: 4, trig: 'Habit' },
-		{ when: 'Mon · 23:10', out: 'surfed', halt: 'Tired', intensity: 7, trig: 'Phone' }
-	]);
-
 	function eventDot(kind: string): string {
 		if (kind === 'surfed') return 'var(--accent)';
 		if (kind === 'craving' || kind === 'smoked') return 'var(--warm)';
@@ -305,40 +313,169 @@
 		return 'var(--faint)';
 	}
 
-	const surfedCount = $derived(history.filter((h) => h.out === 'surfed').length);
-	const surfRate = $derived(history.length ? Math.round((surfedCount / history.length) * 100) : 0);
-	const avgIntensity = $derived(
-		history.length ? (history.reduce((a, h) => a + h.intensity, 0) / history.length).toFixed(1) : '0.0'
+	// ----- Cravings (real DB reads) -----
+	let cravings = $state<CravingRecord[]>([]);
+	let cravingsLoading = $state(true);
+	let cravingsError = $state(false);
+
+	async function loadCravings() {
+		cravingsLoading = true;
+		cravingsError = false;
+		try {
+			cravings = await readCravings(7);
+		} catch (err) {
+			console.error('failed to load cravings:', err);
+			cravingsError = true;
+			cravings = [];
+		} finally {
+			cravingsLoading = false;
+		}
+	}
+
+	function relWhen(ts: string): string {
+		const d = new Date(ts);
+		if (Number.isNaN(d.getTime())) return '';
+		const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+		const day = tsLocalDate(ts);
+		const today = localDate();
+		const yesterday = tsLocalDate(new Date(Date.now() - 86400000).toISOString());
+		if (day === today) return `Today · ${hhmm}`;
+		if (day === yesterday) return `Yesterday · ${hhmm}`;
+		return `${d.toLocaleDateString(undefined, { weekday: 'short' })} · ${hhmm}`;
+	}
+	function haltLabel(halt: HaltFlags | null): string {
+		if (!halt) return '—';
+		const names = Object.keys(HALT_NAMES).filter((k) => (halt as Record<string, boolean>)[k]).map((k) => HALT_NAMES[k]);
+		return names.length ? names.join(' · ') : '—';
+	}
+
+	type HistoryRow = { when: string; out: 'surfed' | 'smoked'; halt: string; intensity: number | null; trig: string };
+	const historyRows = $derived<HistoryRow[]>(
+		cravings.map((c) => ({
+			when: relWhen(c.ts),
+			out: c.outcome,
+			halt: haltLabel(c.halt),
+			intensity: c.intensity,
+			trig: c.triggers.length ? c.triggers.join(', ') : 'Unspecified'
+		}))
 	);
 
-	// ----- mind tree -----
-	type Node = { id: string; label: string; x: number; y: number; big?: boolean; desc: string };
-	const NODES: Node[] = [
-		{ id: 'urge', label: 'Night urges', x: 400, y: 255, big: true, desc: 'The recurring late-evening pull. Strongest when rest and connection run low.' },
-		{ id: 'bored', label: 'Boredom', x: 200, y: 140, desc: 'Unfilled evenings. The urge often shows up to fill the gap.' },
-		{ id: 'phone', label: 'Phone', x: 95, y: 255, desc: 'Scrolling that stretches the night and feeds restlessness.' },
-		{ id: 'lonely', label: 'Loneliness', x: 225, y: 400, desc: 'Wanting connection. The L in HALT — flagged most often.' },
-		{ id: 'work', label: 'After work', x: 585, y: 140, desc: 'The decompression window. A frequent trigger context.' },
-		{ id: 'reward', label: 'Reward me', x: 680, y: 290, desc: '"I earned this." A story the urge tells after a hard day.' },
-		{ id: 'tired', label: 'Tired', x: 440, y: 425, desc: 'The T in HALT. Present in most surfed cravings this week.' },
-		{ id: 'sleep', label: 'Poor sleep', x: 645, y: 420, desc: 'Short nights lower the guard. Upstream of being tired.' }
-	];
-	const EDGES: [string, string][] = [
-		['urge', 'bored'], ['urge', 'lonely'], ['urge', 'work'], ['urge', 'reward'],
-		['urge', 'tired'], ['bored', 'phone'], ['tired', 'sleep'], ['work', 'reward'], ['lonely', 'tired']
-	];
+	const surfedCount = $derived(cravings.filter((c) => c.outcome === 'surfed').length);
+	const surfRate = $derived(cravings.length ? Math.round((surfedCount / cravings.length) * 100) : 0);
+	const intensityValues = $derived(
+		cravings.map((c) => c.intensity).filter((i): i is number => typeof i === 'number')
+	);
+	const avgIntensity = $derived(
+		intensityValues.length
+			? (intensityValues.reduce((a, b) => a + b, 0) / intensityValues.length).toFixed(1)
+			: '—'
+	);
 
-	let selNode = $state('urge');
+	// ----- Mind tree (real DB reads + creation) -----
+	let graph = $state<MindGraph>({ nodes: [], edges: [] });
+	let graphLoading = $state(true);
+	let graphError = $state(false);
+	let selNode = $state<number | null>(null);
+
+	// inline "link a thought" creation
+	let linking = $state(false);
+	let newLabel = $state('');
+	let creating = $state(false);
+
+	async function loadGraph() {
+		graphLoading = true;
+		graphError = false;
+		try {
+			graph = await readMindGraph();
+			if (selNode === null || !graph.nodes.some((n) => n.id === selNode)) {
+				selNode = graph.nodes.length ? graph.nodes[0].id : null;
+			}
+		} catch (err) {
+			console.error('failed to load mind graph:', err);
+			graphError = true;
+			graph = { nodes: [], edges: [] };
+		} finally {
+			graphLoading = false;
+		}
+	}
+
+	type PlacedNode = GraphNode & { x: number; y: number; big: boolean };
+	// Positions are derived from graph shape (not persisted): most-connected node
+	// in the centre, the rest evenly on a ring around it.
+	const layout = $derived.by<PlacedNode[]>(() => {
+		const { nodes, edges } = graph;
+		if (!nodes.length) return [];
+		const deg = new Map<number, number>(nodes.map((n) => [n.id, 0]));
+		for (const [a, b] of edges) {
+			deg.set(a, (deg.get(a) ?? 0) + 1);
+			deg.set(b, (deg.get(b) ?? 0) + 1);
+		}
+		const center = [...nodes].sort((a, b) => (deg.get(b.id) ?? 0) - (deg.get(a.id) ?? 0))[0];
+		const others = nodes.filter((n) => n.id !== center.id);
+		const cx = 400;
+		const cy = 260;
+		const R = others.length > 6 ? 200 : 170;
+		const placed: PlacedNode[] = [{ ...center, x: cx, y: cy, big: true }];
+		others.forEach((n, i) => {
+			const ang = (i / others.length) * Math.PI * 2 - Math.PI / 2;
+			placed.push({ ...n, x: cx + R * Math.cos(ang), y: cy + R * Math.sin(ang), big: false });
+		});
+		return placed;
+	});
+	const posById = $derived(new Map(layout.map((n) => [n.id, n])));
+
 	const connected = $derived.by(() => {
-		const set = new Set<string>();
-		for (const [a, b] of EDGES) {
+		const set = new Set<number>();
+		if (selNode === null) return set;
+		for (const [a, b] of graph.edges) {
 			if (a === selNode) set.add(b);
 			if (b === selNode) set.add(a);
 		}
 		return set;
 	});
-	const selected = $derived(NODES.find((n) => n.id === selNode) ?? NODES[0]);
-	const connList = $derived([...connected].map((id) => NODES.find((n) => n.id === id)!));
+	const selected = $derived(graph.nodes.find((n) => n.id === selNode) ?? null);
+	const connList = $derived(
+		[...connected]
+			.map((id) => graph.nodes.find((n) => n.id === id))
+			.filter((n): n is GraphNode => !!n)
+	);
+
+	function startLinking() {
+		linking = true;
+		newLabel = '';
+	}
+	function cancelLinking() {
+		linking = false;
+		newLabel = '';
+	}
+	async function commitThought() {
+		const label = newLabel.trim();
+		if (!label || creating) return;
+		creating = true;
+		try {
+			const id = await createNode(label);
+			// Link to the currently selected thought; with none selected it's a root.
+			if (selNode !== null) await linkNodes(selNode, id);
+			await loadGraph();
+			selNode = id;
+			linking = false;
+			newLabel = '';
+		} catch (err) {
+			console.error('failed to create thought:', err);
+		} finally {
+			creating = false;
+		}
+	}
+
+	function focusInput(node: HTMLInputElement) {
+		node.focus();
+	}
+
+	onMount(() => {
+		loadEvents();
+		loadCravings();
+		loadGraph();
+	});
 
 	onDestroy(() => {
 		stopSurf();
@@ -499,7 +636,7 @@
 						</div>
 						<div class="card stat">
 							<div class="stat-label">AVG INTENSITY</div>
-							<div class="stat-value">{avgIntensity}<span class="stat-unit">/10</span></div>
+							<div class="stat-value">{avgIntensity}{#if avgIntensity !== '—'}<span class="stat-unit">/10</span>{/if}</div>
 						</div>
 					</div>
 					<section class="card">
@@ -507,19 +644,27 @@
 							<span class="card-title">Recent check-ins</span>
 							<button class="btn soft" onclick={openCraving}>+ New check-in</button>
 						</div>
-						{#each history as h, i (i)}
-							<div class="history-row">
-								<span class="history-when">{h.when}</span>
-								<div class="history-mid">
-									<span class="hm-faint">HALT</span>
-									<span class="hm-strong">{h.halt}</span>
-									<span class="hm-sep">·</span>
-									<span class="hm-muted">{h.trig}</span>
-									<span class="hm-mono">intensity {h.intensity}</span>
+						{#if cravingsLoading}
+							<div class="list-empty">Loading…</div>
+						{:else if cravingsError}
+							<div class="list-empty">Couldn't read events.db.</div>
+						{:else if historyRows.length === 0}
+							<div class="list-empty">No check-ins in the last 7 days. Start one above.</div>
+						{:else}
+							{#each historyRows as h, i (i)}
+								<div class="history-row">
+									<span class="history-when">{h.when}</span>
+									<div class="history-mid">
+										<span class="hm-faint">HALT</span>
+										<span class="hm-strong">{h.halt}</span>
+										<span class="hm-sep">·</span>
+										<span class="hm-muted">{h.trig}</span>
+										<span class="hm-mono">intensity {h.intensity ?? '—'}</span>
+									</div>
+									<span class="badge" class:warm={h.out === 'smoked'}>{h.out === 'surfed' ? 'Surfed' : 'Gave in'}</span>
 								</div>
-								<span class="badge" class:warm={h.out === 'smoked'}>{h.out === 'surfed' ? 'Surfed' : 'Gave in'}</span>
-							</div>
-						{/each}
+							{/each}
+						{/if}
 					</section>
 				</div>
 			{:else}
@@ -530,40 +675,77 @@
 					</div>
 					<div class="mind-grid">
 						<div class="graph">
-							<svg viewBox="0 0 800 520" preserveAspectRatio="xMidYMid meet">
-								{#each EDGES as [a, b], i (i)}
-									{@const on = a === selNode || b === selNode}
-									{@const na = NODES.find((n) => n.id === a)!}
-									{@const nb = NODES.find((n) => n.id === b)!}
-									<line x1={na.x} y1={na.y} x2={nb.x} y2={nb.y} stroke={on ? 'var(--accent)' : 'var(--line-strong)'} stroke-width={on ? 2.2 : 1.4} />
-								{/each}
-								{#each NODES as n (n.id)}
-									{@const isSel = n.id === selNode}
-									{@const isCon = connected.has(n.id)}
-									{@const r = n.big ? 32 : 23}
-									<g class="gnode" onclick={() => (selNode = n.id)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selNode = n.id; } }} role="button" tabindex="0" aria-label={n.label}>
-										{#if isSel}<circle cx={n.x} cy={n.y} r={r + 8} fill="var(--accent-soft)" />{/if}
-										<circle cx={n.x} cy={n.y} {r} fill={isSel ? 'var(--accent)' : 'var(--surface)'} stroke={isSel || isCon ? 'var(--accent)' : 'var(--line-strong)'} stroke-width={isSel ? 2.5 : isCon ? 1.9 : 1.4} />
-										<text x={n.x} y={n.y + r + 18} text-anchor="middle" fill={isSel ? 'var(--accent-text)' : isCon ? 'var(--text)' : 'var(--muted)'} font-weight={isSel || isCon ? 600 : 500} class="gtext">{n.label}</text>
-									</g>
-								{/each}
-							</svg>
+							{#if graphLoading}
+								<div class="graph-empty">Loading…</div>
+							{:else if graphError}
+								<div class="graph-empty">Couldn't read events.db.</div>
+							{:else if graph.nodes.length === 0}
+								<div class="graph-empty">
+									<p class="graph-empty-title">No thoughts yet.</p>
+									<p class="graph-empty-sub">Add your first thought to start mapping the urge.</p>
+								</div>
+							{:else}
+								<svg viewBox="0 0 800 520" preserveAspectRatio="xMidYMid meet">
+									{#each graph.edges as [a, b], i (i)}
+										{@const on = a === selNode || b === selNode}
+										{@const na = posById.get(a)}
+										{@const nb = posById.get(b)}
+										{#if na && nb}
+											<line x1={na.x} y1={na.y} x2={nb.x} y2={nb.y} stroke={on ? 'var(--accent)' : 'var(--line-strong)'} stroke-width={on ? 2.2 : 1.4} />
+										{/if}
+									{/each}
+									{#each layout as n (n.id)}
+										{@const isSel = n.id === selNode}
+										{@const isCon = connected.has(n.id)}
+										{@const r = n.big ? 32 : 23}
+										<g class="gnode" onclick={() => (selNode = n.id)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selNode = n.id; } }} role="button" tabindex="0" aria-label={n.label}>
+											{#if isSel}<circle cx={n.x} cy={n.y} r={r + 8} fill="var(--accent-soft)" />{/if}
+											<circle cx={n.x} cy={n.y} {r} fill={isSel ? 'var(--accent)' : 'var(--surface)'} stroke={isSel || isCon ? 'var(--accent)' : 'var(--line-strong)'} stroke-width={isSel ? 2.5 : isCon ? 1.9 : 1.4} />
+											<text x={n.x} y={n.y + r + 18} text-anchor="middle" fill={isSel ? 'var(--accent-text)' : isCon ? 'var(--text)' : 'var(--muted)'} font-weight={isSel || isCon ? 600 : 500} class="gtext">{n.label}</text>
+										</g>
+									{/each}
+								</svg>
+							{/if}
 						</div>
 						<div class="card sel-panel">
-							<div class="sel-kicker">SELECTED THOUGHT</div>
-							<div class="sel-label">{selected.label}</div>
-							<div class="sel-desc">{selected.desc}</div>
-							<div class="nav-divider tight"></div>
-							<div class="sel-count">Linked to {connected.size} thoughts</div>
-							<div class="chip-row">
-								{#each connList as c (c.id)}
-									<button class="chip" onclick={() => (selNode = c.id)}>{c.label}</button>
-								{/each}
-							</div>
-							<button class="link-btn">
-								<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-								Link a thought
-							</button>
+							{#if selected}
+								<div class="sel-kicker">SELECTED THOUGHT</div>
+								<div class="sel-label">{selected.label}</div>
+								<div class="sel-desc">{selected.description || 'No description yet.'}</div>
+								<div class="nav-divider tight"></div>
+								<div class="sel-count">Linked to {connected.size} {connected.size === 1 ? 'thought' : 'thoughts'}</div>
+								<div class="chip-row">
+									{#each connList as c (c.id)}
+										<button class="chip" onclick={() => (selNode = c.id)}>{c.label}</button>
+									{/each}
+								</div>
+							{:else}
+								<div class="sel-kicker">MIND TREE</div>
+								<div class="sel-label">Start mapping</div>
+								<div class="sel-desc">Add a thought to begin. Each new thought links to the one you have selected.</div>
+							{/if}
+
+							{#if linking}
+								<form class="link-form" onsubmit={(e) => { e.preventDefault(); commitThought(); }}>
+									<input
+										class="link-input"
+										bind:value={newLabel}
+										placeholder={selected ? `Linked to “${selected.label}”…` : 'First thought…'}
+										disabled={creating}
+										use:focusInput
+										onkeydown={(e) => { if (e.key === 'Escape') cancelLinking(); }}
+									/>
+									<div class="link-actions">
+										<button type="button" class="btn outline sm" onclick={cancelLinking} disabled={creating}>Cancel</button>
+										<button type="submit" class="btn accent sm" disabled={creating || !newLabel.trim()}>{creating ? 'Adding…' : 'Add'}</button>
+									</div>
+								</form>
+							{:else}
+								<button class="link-btn" onclick={startLinking}>
+									<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+									{selected ? 'Link a thought' : 'Add a thought'}
+								</button>
+							{/if}
 						</div>
 					</div>
 				</div>
@@ -1089,6 +1271,11 @@
 		color: var(--faint);
 		font-size: 13px;
 	}
+	.list-empty {
+		padding: 22px 20px;
+		color: var(--faint);
+		font-size: 13.5px;
+	}
 	.tl-row {
 		display: flex;
 		gap: 13px;
@@ -1237,6 +1424,27 @@
 		height: 100%;
 		display: block;
 	}
+	.graph-empty {
+		height: 100%;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
+		color: var(--faint);
+		font-size: 13.5px;
+		text-align: center;
+	}
+	.graph-empty-title {
+		margin: 0;
+		font-size: 16px;
+		font-weight: 600;
+		color: var(--muted);
+	}
+	.graph-empty-sub {
+		margin: 0;
+		max-width: 260px;
+	}
 	.gnode {
 		cursor: pointer;
 	}
@@ -1315,6 +1523,37 @@
 	.link-btn:hover {
 		border-color: var(--accent);
 		color: var(--accent-text);
+	}
+	.link-form {
+		margin-top: auto;
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+	}
+	.link-input {
+		width: 100%;
+		padding: 11px 12px;
+		border-radius: 10px;
+		border: 1px solid var(--line-strong);
+		background: var(--surface-2);
+		color: var(--text);
+		font: 500 13.5px var(--font-sans);
+		outline: none;
+	}
+	.link-input:focus {
+		border-color: var(--accent);
+	}
+	.link-input::placeholder {
+		color: var(--faint);
+	}
+	.link-actions {
+		display: flex;
+		gap: 8px;
+	}
+	.btn.sm {
+		flex: 1;
+		padding: 9px;
+		font-size: 13px;
 	}
 
 	/* ===== craving overlay ===== */

@@ -2,6 +2,7 @@ export type EventType =
 	| 'idea_captured'
 	| 'task_created'
 	| 'task_completed'
+	| 'node_created'
 	| 'node_linked'
 	| 'tag_added'
 	| 'deadline_set'
@@ -42,12 +43,13 @@ type PayloadMap = {
 	idea_captured: { text: string; inbox: boolean };
 	task_created: { title: string; node_id?: number; deadline?: string };
 	task_completed: { task_id: number; duration_ms?: number };
+	node_created: { label: string; description?: string };
 	node_linked: { source_id: number; target_id: number; relation: string };
 	tag_added: { entity_id: number; entity_type: 'task' | 'node'; tag: string };
 	deadline_set: { entity_id: number; entity_type: 'task' | 'node'; deadline: string };
 	halt_checked: { halt: HaltFlags };
 	mood_logged: { valence: number; arousal?: number; notes?: string };
-	craving_logged: { halt: HaltFlags; active_task_id?: number };
+	craving_logged: { halt: HaltFlags; intensity?: number; triggers?: string[]; active_task_id?: number };
 	craving_resolved: { outcome: 'surfed' | 'smoked'; duration_ms: number };
 	cigarette_smoked: { location?: string; notes?: string };
 	walk_started: { planned_duration_ms?: number };
