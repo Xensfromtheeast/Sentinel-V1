@@ -116,23 +116,25 @@
 		display: flex;
 		align-items: center;
 		height: 48px;
-		background: #1a1a2e;
-		border: 1px solid #3a3a5c;
-		border-radius: 8px;
-		padding: 0 12px;
-		gap: 10px;
+		background: var(--surface);
+		border: 1px solid var(--line-strong);
+		border-radius: 10px;
+		padding: 0 14px;
+		gap: 11px;
 		box-sizing: border-box;
 		width: 100%;
+		box-shadow: var(--shadow);
+		font-family: var(--font-sans);
 	}
 
 	.mode-badge {
-		font-family: monospace;
+		font-family: var(--font-mono);
 		font-size: 11px;
-		color: #7878aa;
+		color: var(--faint);
 		white-space: nowrap;
 		user-select: none;
 		text-transform: uppercase;
-		letter-spacing: 0.05em;
+		letter-spacing: 0.08em;
 	}
 
 	.bar-input {
@@ -140,13 +142,13 @@
 		background: transparent;
 		border: none;
 		outline: none;
-		color: #e8e8ff;
+		color: var(--text);
 		font-size: 15px;
 		font-family: inherit;
-		caret-color: #9898cc;
+		caret-color: var(--accent);
 	}
 
 	.bar-input::placeholder {
-		color: #4a4a6a;
+		color: var(--faint);
 	}
 </style>

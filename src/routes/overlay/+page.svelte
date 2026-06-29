@@ -135,27 +135,30 @@
 		gap: 18px;
 		height: 320px;
 		width: 440px;
-		background: #1a1a2e;
-		border: 1px solid #3a3a5c;
-		border-radius: 12px;
-		padding: 24px;
+		background: var(--surface);
+		border: 1px solid var(--line);
+		border-radius: 16px;
+		padding: 26px;
 		box-sizing: border-box;
-		font-family: inherit;
-		color: #e8e8ff;
+		font-family: var(--font-sans);
+		color: var(--text);
+		box-shadow: var(--shadow-pop);
 	}
 
 	.prompt {
-		font-size: 14px;
-		color: #9898cc;
+		font-size: 14.5px;
+		color: var(--muted);
 		margin: 0;
 		text-align: center;
+		line-height: 1.5;
 	}
 
 	.timer {
-		font-size: 48px;
+		font-family: var(--font-mono);
+		font-size: 44px;
 		font-variant-numeric: tabular-nums;
-		font-weight: 300;
-		color: #e8e8ff;
+		font-weight: 500;
+		color: var(--text);
 		margin: 0;
 		letter-spacing: 0.02em;
 	}
@@ -168,49 +171,50 @@
 	}
 
 	.halt-btn {
-		padding: 10px 0;
-		background: #2a2a4a;
-		border: 1px solid #3a3a5c;
-		border-radius: 8px;
-		color: #7878aa;
+		padding: 12px 0;
+		background: var(--surface-2);
+		border: 1.5px solid transparent;
+		border-radius: 12px;
+		color: var(--text);
 		font-size: 13px;
-		font-family: monospace;
+		font-family: var(--font-sans);
+		font-weight: 600;
 		cursor: pointer;
-		transition: background 0.1s, color 0.1s, border-color 0.1s;
+		transition: background 0.12s, color 0.12s, border-color 0.12s;
 		user-select: none;
 	}
 
 	.halt-btn:hover {
-		background: #3a3a5c;
-		color: #c8c8ee;
+		background: var(--surface-3);
 	}
 
 	.halt-btn.active {
-		background: #3a2a5c;
-		border-color: #7878cc;
-		color: #c8b8ff;
+		background: var(--accent-soft);
+		border-color: var(--accent);
+		color: var(--accent-text);
 	}
 
 	.action-btn {
-		padding: 10px 24px;
-		border-radius: 8px;
+		padding: 12px 24px;
+		border-radius: 11px;
 		font-size: 14px;
-		font-family: inherit;
+		font-family: var(--font-sans);
+		font-weight: 600;
 		cursor: pointer;
 		border: none;
-		transition: opacity 0.1s;
+		transition: filter 0.12s;
 		user-select: none;
 	}
 
 	.action-btn:hover {
-		opacity: 0.85;
+		filter: brightness(1.07);
 	}
 
 	.action-btn.primary {
-		background: #5a4a8c;
-		color: #e8e8ff;
+		background: var(--accent);
+		color: #fff;
 		width: 100%;
-		padding: 12px 0;
+		padding: 13px 0;
 	}
 
 	.resolve-row {
@@ -221,13 +225,13 @@
 
 	.action-btn.surf {
 		flex: 1;
-		background: #2a5c3a;
-		color: #a8e8b8;
+		background: var(--accent);
+		color: #fff;
 	}
 
 	.action-btn.smoke {
 		flex: 1;
-		background: #3a2a2a;
-		color: #e8a8a8;
+		background: var(--warm-soft);
+		color: var(--warm-text);
 	}
 </style>
