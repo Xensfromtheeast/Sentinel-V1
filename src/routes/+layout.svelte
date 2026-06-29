@@ -3,6 +3,9 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import { WebviewWindow, getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 	import { register, unregister } from '@tauri-apps/plugin-global-shortcut';
+	import '$lib/styles/theme.css';
+	// Subscribing to the store applies data-theme to <html> in every window.
+	import '$lib/stores/theme.js';
 
 	let { children } = $props();
 
