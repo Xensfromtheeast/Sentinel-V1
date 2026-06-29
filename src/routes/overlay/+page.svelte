@@ -10,6 +10,7 @@
 	let halt = $state<HaltFlags>({ hungry: false, angry: false, lonely: false, tired: false });
 	let elapsed = $state(0);
 	let startedAt = 0;
+	let loggedId: number | undefined;
 
 	const win = getCurrentWebviewWindow();
 	let interval: ReturnType<typeof setInterval> | undefined;
@@ -21,6 +22,7 @@
 		halt = { hungry: false, angry: false, lonely: false, tired: false };
 		elapsed = 0;
 		startedAt = 0;
+		loggedId = undefined;
 	}
 
 	function toggle(flag: keyof HaltFlags) {
@@ -33,7 +35,10 @@
 	}
 
 	async function handleLogCraving() {
-		await logCraving(halt);
+		loggedId = await logCraving(halt).catch((e) => {
+			console.error(e);
+			return undefined;
+		});
 		startedAt = Date.now();
 		elapsed = 0;
 		phase = 'surfing';
@@ -43,12 +48,12 @@
 	}
 
 	async function handleSurfed() {
-		await resolveAsSurfed(startedAt).catch(console.error);
+		await resolveAsSurfed(startedAt, loggedId).catch(console.error);
 		await hide();
 	}
 
 	async function handleSmoked() {
-		await resolveAsSmoked(startedAt).catch(console.error);
+		await resolveAsSmoked(startedAt, loggedId).catch(console.error);
 		await hide();
 	}
 
