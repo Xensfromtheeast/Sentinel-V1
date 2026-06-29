@@ -2,11 +2,36 @@
  * Sentinel design system — global tokens.
  *
  * Ported from the Claude Design handoff (Sentinel Desktop App Redesign).
- * Fonts are referenced by name with local/system fallbacks rather than pulled
- * from a webfont CDN — the app is local-only by contract (no cloud, no
- * telemetry), so a runtime request to Google Fonts is not acceptable. Drop
- * self-hosted woff2 + @font-face here later if pixel-exact type is required.
+ * Fonts are self-hosted (static/fonts/*.woff2, latin subset) and served from
+ * the app origin — no webfont CDN, so nothing leaves the machine, honoring the
+ * local-only, no-telemetry contract. System fonts remain as fallbacks.
+ * Hanken Grotesk is a variable font (one file covers 100–900); IBM Plex Mono
+ * ships as static 400/500. Both are OFL-licensed.
  */
+
+@font-face {
+	font-family: 'Hanken Grotesk';
+	font-style: normal;
+	font-weight: 100 900;
+	font-display: swap;
+	src: url('/fonts/hanken-grotesk-latin.woff2') format('woff2');
+}
+
+@font-face {
+	font-family: 'IBM Plex Mono';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('/fonts/ibm-plex-mono-400.woff2') format('woff2');
+}
+
+@font-face {
+	font-family: 'IBM Plex Mono';
+	font-style: normal;
+	font-weight: 500;
+	font-display: swap;
+	src: url('/fonts/ibm-plex-mono-500.woff2') format('woff2');
+}
 
 :root,
 [data-theme='light'] {

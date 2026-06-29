@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { EditorView, keymap } from '@codemirror/view';
 	import { EditorState } from '@codemirror/state';
 	import { basicSetup } from 'codemirror';
@@ -7,6 +7,7 @@
 	import { readDailyNote, writeDailyNote, saveNote, localDate } from '$lib/note/index.js';
 	import { exportAll } from '$lib/export/index.js';
 	import { logCraving, resolveAsSurfed, resolveAsSmoked } from '$lib/overlay/actions.js';
+	import { readRecentEvents, type StoredEvent } from '$lib/db/queries.js';
 	import { theme, toggleTheme } from '$lib/stores/theme.js';
 	import type { HaltFlags } from '$lib/types/events.js';
 
@@ -184,23 +185,111 @@
 			if (surf <= 0) finish('surfed');
 		}, 1000);
 	}
-	function finish(result: 'surfed' | 'smoked') {
+	async function finish(result: 'surfed' | 'smoked') {
 		stopSurf();
 		outcome = result;
 		step = 3;
-		if (result === 'surfed') resolveAsSurfed(startedAt).catch(console.error);
-		else resolveAsSmoked(startedAt).catch(console.error);
-		recordLocalEvent(result);
+		try {
+			if (result === 'surfed') await resolveAsSurfed(startedAt);
+			else await resolveAsSmoked(startedAt);
+		} catch (err) {
+			console.error('failed to resolve craving:', err);
+		}
+		// Reflect the just-written craving (and its earlier logged event) in the timeline.
+		loadEvents();
 	}
 
-	// ----- presentational data (wired to real DB in later feature branches) -----
+	// ----- Today timeline (real DB reads) -----
 	type EventRow = { time: string; label: string; detail: string; kind: string };
-	let events = $state<EventRow[]>([
-		{ time: '13:02', label: 'HALT check', detail: 'Flagged: Lonely', kind: 'halt' },
-		{ time: '09:15', label: 'Craving · surfed', detail: 'Tired · intensity 6 · after work', kind: 'surfed' },
-		{ time: '08:40', label: 'Daily note opened', detail: 'Morning entry', kind: 'note' }
-	]);
+	let events = $state<EventRow[]>([]);
+	let eventsLoading = $state(true);
+	let eventsError = $state(false);
+	let surfedToday = $state(0);
 
+	const HALT_NAMES: Record<string, string> = {
+		hungry: 'Hungry',
+		angry: 'Angry',
+		lonely: 'Lonely',
+		tired: 'Tired'
+	};
+
+	function fmtTime(ts: string): string {
+		const d = new Date(ts);
+		if (Number.isNaN(d.getTime())) return '';
+		return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+	}
+	function tsLocalDate(ts: string): string {
+		const d = new Date(ts);
+		if (Number.isNaN(d.getTime())) return '';
+		return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+	}
+	function haltText(payload: Record<string, unknown>): string {
+		const halt = (payload.halt ?? {}) as Record<string, unknown>;
+		const flags = Object.keys(HALT_NAMES).filter((k) => halt[k]).map((k) => HALT_NAMES[k]);
+		return flags.length ? 'Flagged: ' + flags.join(' · ') : 'No flags';
+	}
+	function describe(ev: StoredEvent): { label: string; detail: string; kind: string } {
+		const p = ev.payload;
+		switch (ev.eventType) {
+			case 'craving_logged':
+				return { label: 'Craving · logged', detail: haltText(p), kind: 'craving' };
+			case 'craving_resolved': {
+				const surfed = p.outcome === 'surfed';
+				const secs = typeof p.duration_ms === 'number' ? Math.round(p.duration_ms / 1000) : 0;
+				return {
+					label: surfed ? 'Craving · surfed' : 'Craving · gave in',
+					detail: `${surfed ? 'surfed' : 'gave in'} · ${secs}s`,
+					kind: surfed ? 'surfed' : 'smoked'
+				};
+			}
+			case 'halt_checked':
+				return { label: 'HALT check', detail: haltText(p), kind: 'halt' };
+			case 'cigarette_smoked':
+				return { label: 'Cigarette', detail: 'logged', kind: 'smoked' };
+			case 'summary_written':
+				return {
+					label: 'Daily note saved',
+					detail: typeof p.word_count === 'number' ? `${p.word_count} words` : '',
+					kind: 'note'
+				};
+			case 'idea_captured':
+				return { label: 'Idea captured', detail: typeof p.text === 'string' ? p.text : '', kind: 'idea' };
+			case 'focus_block_started':
+				return { label: 'Focus block', detail: 'started', kind: 'focus' };
+			case 'focus_block_ended':
+				return { label: 'Focus block', detail: 'ended', kind: 'focus' };
+			case 'task_completed':
+				return { label: 'Task completed', detail: '', kind: 'task' };
+			case 'app_opened':
+				return { label: 'App opened', detail: '', kind: 'note' };
+			default:
+				return { label: String(ev.eventType).replace(/_/g, ' '), detail: '', kind: 'other' };
+		}
+	}
+
+	async function loadEvents() {
+		eventsLoading = true;
+		eventsError = false;
+		try {
+			const today = localDate();
+			const recent = await readRecentEvents(200);
+			const todays = recent.filter((e) => tsLocalDate(e.ts) === today);
+			events = todays.map((e) => ({ time: fmtTime(e.ts), ...describe(e) }));
+			surfedToday = todays.filter(
+				(e) => e.eventType === 'craving_resolved' && e.payload.outcome === 'surfed'
+			).length;
+		} catch (err) {
+			console.error('failed to load events:', err);
+			eventsError = true;
+			events = [];
+		} finally {
+			eventsLoading = false;
+		}
+	}
+
+	onMount(loadEvents);
+
+	// ----- presentational data (Cravings view — wired in a later feature branch) -----
 	type HistoryRow = { when: string; out: 'surfed' | 'smoked'; halt: string; intensity: number; trig: string };
 	let history = $state<HistoryRow[]>([
 		{ when: 'Today · 09:15', out: 'surfed', halt: 'Tired', intensity: 6, trig: 'After work' },
@@ -208,24 +297,6 @@
 		{ when: 'Yesterday · 16:05', out: 'smoked', halt: '—', intensity: 4, trig: 'Habit' },
 		{ when: 'Mon · 23:10', out: 'surfed', halt: 'Tired', intensity: 7, trig: 'Phone' }
 	]);
-
-	function recordLocalEvent(result: 'surfed' | 'smoked') {
-		const trigSummary =
-			TRIGGERS.filter(([k]) => trig[k]).map(([, l]) => l).join(', ') || 'Unspecified';
-		events = [
-			{
-				time: 'now',
-				label: result === 'surfed' ? 'Craving · surfed' : 'Craving · logged',
-				detail: `${haltSummary} · intensity ${intensity}`,
-				kind: result === 'surfed' ? 'surfed' : 'craving'
-			},
-			...events
-		];
-		history = [
-			{ when: 'Just now', out: result, halt: haltSummary, intensity, trig: trigSummary },
-			...history
-		];
-	}
 
 	function eventDot(kind: string): string {
 		if (kind === 'surfed') return 'var(--accent)';
@@ -356,7 +427,9 @@
 					<div class="today-head">
 						<div class="kicker">SUNDAY, JUNE 28</div>
 						<h1>Good evening.</h1>
-						<p class="sub">You've surfed {surfedCount} urges today. Mode is steady.</p>
+						<p class="sub">
+							{#if surfedToday === 0}No urges surfed yet today. Mode is steady.{:else}You've surfed {surfedToday} {surfedToday === 1 ? 'urge' : 'urges'} today. Mode is steady.{/if}
+						</p>
 					</div>
 					<div class="today-grid">
 						<section class="card note-card">
@@ -381,21 +454,29 @@
 									<span class="card-meta">{events.length} logged</span>
 								</div>
 								<div class="timeline">
-									{#each events as ev, i (i)}
-										<div class="tl-row">
-											<div class="tl-rail">
-												<span class="tl-dot" style="background:{eventDot(ev.kind)}"></span>
-												{#if i < events.length - 1}<span class="tl-line"></span>{/if}
-											</div>
-											<div class="tl-body">
-												<div class="tl-top">
-													<span class="tl-label">{ev.label}</span>
-													<span class="tl-time">{ev.time}</span>
+									{#if eventsLoading}
+										<div class="tl-empty">Loading…</div>
+									{:else if eventsError}
+										<div class="tl-empty">Couldn't read events.db.</div>
+									{:else if events.length === 0}
+										<div class="tl-empty">No events logged today yet.</div>
+									{:else}
+										{#each events as ev, i (i)}
+											<div class="tl-row">
+												<div class="tl-rail">
+													<span class="tl-dot" style="background:{eventDot(ev.kind)}"></span>
+													{#if i < events.length - 1}<span class="tl-line"></span>{/if}
 												</div>
-												<div class="tl-detail">{ev.detail}</div>
+												<div class="tl-body">
+													<div class="tl-top">
+														<span class="tl-label">{ev.label}</span>
+														<span class="tl-time">{ev.time}</span>
+													</div>
+													{#if ev.detail}<div class="tl-detail">{ev.detail}</div>{/if}
+												</div>
 											</div>
-										</div>
-									{/each}
+										{/each}
+									{/if}
 								</div>
 							</section>
 						</div>
@@ -1002,6 +1083,11 @@
 
 	.timeline {
 		padding: 6px 18px 16px;
+	}
+	.tl-empty {
+		padding: 14px 0 6px;
+		color: var(--faint);
+		font-size: 13px;
 	}
 	.tl-row {
 		display: flex;
